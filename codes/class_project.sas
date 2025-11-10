@@ -1,28 +1,21 @@
-/* ============================================================
-   TRAUMA CENTER ACCESS — SAS OnDemand (GA only)
-   Sheets/columns per your screenshot: 'GA data' with
-     mname, mstate, lat, longitude, fcounty, trauml90, ...
-   ============================================================ */
-
 /*Run this portion of code first then followed by the python code for maps*/
 
 options mprint mlogic symbolgen validvarname=v7;
 
-/* ---- 0) Path to your Excel (EDIT ME) ---- */
+/* Path to Excel file */
 %let xls_path = G:/My Drive/Projects papers/Stat Consulting/Map Project/AHA_2021_GA.xlsx;
 
-/* ---- 1) Import trauma centers from the 'GA data' sheet ---- */
+/*Import trauma centers from the 'GA data' sheet */
 libname aha xlsx "&xls_path";
 
-/* Peek at available sheets/columns */
+/* Check available sheets/columns */
 proc contents data=aha._all_ nods; run;
 
-/* Bring in the sheet exactly as named (space handled via name literal) */
 data work.hosp_raw;
   set aha.'GA data'n;
 run;
 
-/* --- Keep only trauma centers with valid coordinates --- */
+/* Keep only trauma centers with valid coordinates */
 data work.trauma;
   set work.hosp_raw;
   /* Convert lat/longitude safely in case Excel imported them as text */
@@ -40,7 +33,7 @@ run;
 
 
 
-/* ---- 2) Build Georgia ZIP centroids from SASHELP.ZIPCODE ---- */
+/* Build Georgia ZIP centroids from SASHELP.ZIPCODE */
 proc sql;
   create table work.zip_ga as
   select put(zip, z5.) as zip length=5,
@@ -65,10 +58,10 @@ data work.trauma;
   rename lat_num = lat  lon_num = lon;   /* now lat/lon are NUMERIC */
 run;
 
-/* (Optional) verify types */
+/* Verify types */
 proc contents data=work.trauma; run;
 
-/* Now this will work — all args to GEODIST are numeric */
+/* All args to GEODIST are now numeric */
 proc sql;
   create table work.zip_trauma_geo as
   select z.zip, z.city, z.county, z.zip_lat, z.zip_lon,
@@ -77,7 +70,7 @@ proc sql;
   from work.zip_ga z, work.trauma t;
 quit;
 
-/* ===== OSRM routing (per-pair) with progress tracking ===== */
+/* OSRM routing (per-pair) with progress tracking (this process can take over 1hr) */
 %macro osrm_route(in=work.nearest_geo, out=work.route_results, sleep_sec=0.25, progress_every=25);
   %local nobs i ok fail t0;
   /* fresh output */
@@ -115,7 +108,7 @@ quit;
         set jresp.routes (obs=1);
         zip         = "&zip";
         hosp_name   = "&hospnm";
-        miles_drive = distance / 1609.344;   /* meters -> miles */
+        miles_drive = distance / 1609.344;   /* meters to miles */
         time_sec    = duration;              /* seconds */
         http_code   = &http_code;
         keep zip hosp_name miles_drive time_sec http_code;
@@ -137,7 +130,7 @@ quit;
     filename resp clear;
     /* polite throttle */
     data _null_; call sleep(&sleep_sec, 1); run;
-    /* ---- progress to log every PROGRESS_EVERY rows (and on first/last) ---- */
+    /* progress to log every PROGRESS_EVERY rows (and on first/last) */
     %if %sysevalf(&i=1 or %sysfunc(mod(&i,&progress_every))=0 or &i=&nobs) %then %do;
       data _null_;
         length msg $200.;
@@ -165,11 +158,8 @@ quit;
 %mend;
 
 
-/* ============================================================
-   START: REPLACE FROM THIS POINT DOWN
-   ============================================================ */
 
-/* --- Find Top 5 nearest by straight-line as candidates --- */
+/* Find Top 5 nearest by straight-line as candidates */
 /* (This assumes the "fastest" drive is likely in the top 5 closest) */
 proc sort data=work.zip_trauma_geo; 
   by zip miles_geo; 
@@ -189,9 +179,8 @@ proc print data=work.nearest_top5_geo(obs=15);
   title "Top 5 Straight-Line Candidates (First 3 ZIPs)";
 run; title;
 
-/* ===== OSRM routing on ALL candidates ===== */
-/* NOTE: This will take ~5x as long as the original run */
-/* Test on a small sample first */
+
+/* Another Test on a small sample first */
 data work.ng_test_top5;
   set work.nearest_top5_geo;
   if zip in ('30002', '30003', '30004');
@@ -205,7 +194,7 @@ proc print data=work.route_results_test; title "OSRM test results (Top 5 Candida
 %osrm_route(in=work.nearest_top5_geo, out=work.route_results, sleep_sec=0.30, progress_every=25);
 
 
-/* --- Format OSRM results --- */
+/* Format OSRM results */
 data work.route_results_fmt;
   set work.route_results;
   length time_text $40;
@@ -217,7 +206,7 @@ data work.route_results_fmt;
   drop hours mins;
 run;
 
-/* --- Join all metrics for all candidates --- */
+/* Join all metrics for all candidates */
 proc sql;
   create table work.all_candidate_distances as
   select a.zip, a.city, a.county,
@@ -234,11 +223,8 @@ proc sql;
   where r.http_code = 200; /* Only keep successful routes */
 quit;
 
-/* ============================================================
-   RE-RUN FROM THIS POINT (NO OSRM RE-RUN NEEDED)
-   ============================================================ */
 
-/* 1. Winner by Straight-Line (miles_geo) */
+/* Winner by Straight-Line (miles_geo) */
 proc sort data=work.all_candidate_distances out=work.winners_geo;
   by zip miles_geo;
 run;
@@ -251,7 +237,7 @@ data work.winner_geo;
   rename miles_geo = winning_value;
 run;
 
-/* 2. Winner by Driving Distance (miles_drive) */
+/* Winner by Driving Distance (miles_drive) */
 proc sort data=work.all_candidate_distances(where=(not missing(miles_drive))) 
           out=work.winners_drive;
   by zip miles_drive;
@@ -265,7 +251,7 @@ data work.winner_drive;
   rename miles_drive = winning_value;
 run;
 
-/* 3. Winner by Driving Time (time_sec) */
+/* Winner by Driving Time (time_sec) */
 proc sort data=work.all_candidate_distances(where=(not missing(time_sec))) 
           out=work.winners_time;
   by zip time_sec;
@@ -279,7 +265,7 @@ data work.winner_time;
   rename time_sec = winning_value;
 run;
 
-/* --- Stack all winners into one file (WITH THE FIX) --- */
+/* Stack all winners into one file */
 data work.all_winners_by_zip;
   set work.winner_geo
       work.winner_drive
@@ -287,7 +273,6 @@ data work.all_winners_by_zip;
   /* Keep key columns for the final file */
   keep zip city county metric_type hosp_name winning_value
        miles_geo miles_drive time_sec time_text
-       /* --- THIS IS THE FIX --- */
        zip_lon zip_lat hosp_lon hosp_lat;
 run;
 
@@ -295,13 +280,13 @@ proc sort data=work.all_winners_by_zip;
   by zip metric_type;
 run;
 
-/* --- Print a sample of the new final table --- */
+/* Print a sample of the new final table */
 title "Nearest Trauma Center by 3 Metrics (Sample with Coords)";
 proc print data=work.all_winners_by_zip(obs=15) label;
   var zip city metric_type hosp_name zip_lon zip_lat;
 run; title;
 
-/* ---- Export the new 'winners' file to CSV ---- */
+/* Export the new 'winners' file to CSV */
 %let csv_output_path_winners = 'G:/My Drive/Projects papers/Stat Consulting/Map Project/trauma_winners_by_zip.csv';
 
 PROC EXPORT
@@ -310,3 +295,5 @@ PROC EXPORT
     DBMS=CSV
     REPLACE;
 RUN;
+
+/* After exporting, import this file in python and create interactive plots */
