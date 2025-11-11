@@ -1,14 +1,10 @@
-/* ================================================================
-   ATP 2025 — Men only
-   Descriptives + RQ1-M + RQ2-M
-   Topic: Analyzing Upsets in Men's Professional Tennis: The Impact of Surface, Match Format,
-   and Tournament Round (ATP Tour 2025)
+/* Topic: Analyzing Upsets in Men's Professional Tennis: The Impact of Surface, Match Format,
+   and Tournament Round (ATP Tour 2025) */
    
-   RQ1: Do upset rates vary by playing surface?
-   RQ2: What factors are associated with an increased probability of an upset?
-  ., ================================================================ */
+/* Research Question 1 (RQ1): Do upset rates vary by playing surface?
+   Research Question 2 (RQ2): What factors are associated with an increased probability of an upset? */
 
-/* 0) ENV + OUTPUT ------------------------------------------------*/
+/* ENV + OUTPUT */
 options validvarname=any nocenter nodate nonumber;  /* allow 'Best of'n names */
 ods noproctitle; 
 ods graphics on / width=6in height=4in border=off;
@@ -21,14 +17,14 @@ ods rtf file="&rtfpath" style=HTMLBlue bodytitle startpage=no;
 title "Analyzing Upsets in Men's Professional Tennis: The Impact of Surface, Match Format, and Tournament Round (ATP Tour 2025)";
 
 
-/* ==================== 1) DATA IMPORT ==================== */
+/* DATA IMPORT */
 ods text="^{style [font_weight=bold font_size=11pt] 1) Import ATP 2025 (Men) from Excel}";
 proc import datafile="&men_xlsx" dbms=xlsx out=men_raw replace;
   getnames=yes;
 run;
 
 
-/* ==================== 2) DATA CLEANING ==================== */
+/* DATA CLEANING */
 %let LEN_TOURN  = 100;
 %let LEN_PLAYER =  50;
 %let LEN_LOC    =  50;
@@ -57,7 +53,7 @@ data men_clean(label="ATP 2025 — Men (cleaned)");
   gender  = "Men";
   tour_id = strip(ATP);
 
-  /* ---------- QUIET, robust numeric conversions ---------- */
+  /* Numeric conversions */
   if vtype(WRank)='N' then wrank_n = WRank;   else wrank_n = input(strip(vvalue(WRank)), ?? best32.);
   if vtype(LRank)='N' then lrank_n = LRank;   else lrank_n = input(strip(vvalue(LRank)), ?? best32.);
   if vtype(WPts) ='N' then wpts_n  = WPts;    else wpts_n  = input(strip(vvalue(WPts )), ?? best32.);
@@ -97,7 +93,7 @@ data men_clean(label="ATP 2025 — Men (cleaned)");
     then status_flag='DROP';
   else status_flag='KEEP';
 
-  /* (Optional) single debug line if any row still errors */
+  /* Single debug line if any row gives errors */
   if _error_ then do;
     putlog 'NOTE: Bad parse on row=' _n_
            ' WRank=' WRank= ' LRank=' LRank= ' WPts=' WPts= ' LPts=' LPts=
@@ -156,7 +152,7 @@ data atp25_men;
 run;
 
 
-/* ==================== 3) DESCRIPTIVE ANALYSIS ==================== */
+/* DESCRIPTIVE ANALYSIS */
 ods text="^{style [font_weight=bold font_size=11pt] 3) Descriptive summaries for ATP 2025 (Men)}";
 
 /* Table 1: Match Distribution by Surface */
@@ -178,7 +174,7 @@ proc means data=atp25_men n nmiss mean std min p25 median p75 max maxdec=1;
 run;
 
 
-/* ==================== 4) RESEARCH QUESTION 1 ==================== */
+/* RESEARCH QUESTION 1 */
 /* RQ1: Do upset rates vary by playing surface? */
 ods text="^{style [font_weight=bold font_size=12pt] RQ1: Do upset rates vary by surface (Men only)?}";
 
@@ -221,7 +217,7 @@ proc freq data=rq1_use;
 run;
 
 
-/* ==================== 5) RESEARCH QUESTION 2 ==================== */
+/* RESEARCH QUESTION 2 */
 /* RQ2: What factors are associated with an increased probability of an upset? */
 ods text="^{style [font_weight=bold font_size=12pt] RQ2: Factors associated with upsets}";
 
@@ -242,8 +238,29 @@ data rq2_model;
   label round_cat = "Tournament Round Category";
 run;
 
-/* Table 6: Logistic Regression - Upset Probability by Round */
-title "Table 6: Logistic Regression - Upset Probability by Round";
+
+/* Table 6: Upset Summary by Tournament Round Category */
+title "Table 6: Upset Summary by Tournament Round Category";
+proc sql;
+  create table roundcat_summary as
+  select round_cat,
+         count(*) as n_matches,
+         sum(upset=1) as n_upsets,
+         mean(upset*1.0) as upset_rate format=percent8.1
+  from rq2_model
+  where round_cat ne ''
+  group by round_cat;
+quit;
+
+proc print data=roundcat_summary noobs label;
+  label round_cat="Tournament Round Category"
+        n_matches="Number of Matches"
+        n_upsets="Number of Upsets"
+        upset_rate="Upset Rate";
+run;
+
+/* Table 7: Logistic Regression - Upset Probability by Round */
+title "Table 7: Logistic Regression - Upset Probability by Round";
 proc logistic data=rq2_model;
   class round_cat(ref='Final') / param=ref;
   model upset(event='1') = round_cat;
@@ -257,6 +274,10 @@ proc means data=rq2_model noprint;
   output out=round_upsets mean=upset_rate n=n_matches;
 run;
 
+/* Export Figure 1 as PNG */
+ods listing gpath="G:/My Drive/Augusta University files/Fall 2025/DATS 7510/DATS7510/Project/";
+ods graphics / reset imagename="upset_prob" imagefmt=png width=6in height=4in;
+
 /* Figure 1: Upset Probability by Tournament Round */
 title "Figure 1: Upset Probability by Tournament Round";
 proc sgplot data=round_upsets;
@@ -266,6 +287,8 @@ proc sgplot data=round_upsets;
   yaxis label="Upset Rate" values=(0 to 0.5 by 0.1);
   xaxis label="Tournament Round";
 run;
+
+ods listing close;
 
 /* Table 7: Logistic Regression - Upset Probability by Match Format */
 title "Table 7: Logistic Regression - Upset Probability by Match Format";
@@ -282,6 +305,11 @@ proc means data=rq2_model noprint;
   output out=format_upsets mean=upset_rate n=n_matches;
 run;
 
+
+/* Export Figure 2 as PNG */
+ods listing gpath="G:/My Drive/Augusta University files/Fall 2025/DATS 7510/DATS7510/Project/";
+ods graphics / reset imagename="match_form" imagefmt=png width=6in height=4in;
+
 /* Figure 2: Upset Probability by Match Format */
 title "Figure 2: Upset Probability by Match Format";
 proc sgplot data=format_upsets;
@@ -292,8 +320,9 @@ proc sgplot data=format_upsets;
   xaxis label="Match Format (Best of)" integer;
 run;
 
+ods listing close;
 
-/* ==================== 6) SAVE FINAL DATASET ==================== */
+/* SAVE FINAL DATASET */
 ods text="^{style [font_weight=bold font_size=11pt] Save analysis-ready dataset}";
 data work.atp2025_men_clean;
   set atp25_men;
